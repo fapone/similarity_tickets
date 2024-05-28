@@ -18,3 +18,4 @@ python-json-logger
 langchain_community
 langchain_openai
 logging
+pandas_gbq

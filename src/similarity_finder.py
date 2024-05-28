@@ -5,6 +5,8 @@ from joblib import Parallel, delayed
 from embedding import DatabaseService
 from embedding import DocumentSearchService
 import time
+from google.oauth2 import service_account
+import pandas_gbq
 
 class SimilarityFinder:
     def __init__(self):
@@ -31,9 +33,9 @@ class SimilarityFinder:
             top_3 = df_sorted.index[2] if len(df_sorted) > 2 else None
 
             # Additional columns corresponding only to found indexes
-            results_df['Top 1'] = results_df.index == top_1
-            results_df['Top 2'] = results_df.index == top_2 if top_2 else False
-            results_df['Top 3'] = results_df.index == top_3 if top_3 else False
+            results_df['top_1'] = results_df.index == top_1
+            results_df['top_2'] = results_df.index == top_2 if top_2 else False
+            results_df['top_3'] = results_df.index == top_3 if top_3 else False
 
             # Add top ticket IDs to the DataFrame
             results_df['sentence'] = sentence
@@ -47,29 +49,19 @@ class SimilarityFinder:
         return pd.DataFrame()  # Return an empty DataFrame if no results are found
 
     def process_data(self, product, module, sentence):
-        # Create an instance of DatabaseService
-        DatabaseService = DatabaseService()
 
-        # Connecting to the database
-        conn = DatabaseService._get_database_connection()
-        cur = conn.cursor()
-
-        # Execute the query to fetch the embeddings for each ticket_id
-        ticket_inputs = []
-        cur.execute(f"""
+        # Select the ticket_id and sentence_embedding from the Vectorized Database
+        select_statement = (f"""
                     select te.ticket_id, sentence_embedding 
                     from tickets_embeddings te
                     INNER JOIN tickets_similares ts
                         ON ts.ticket_id = te.ticket_id
                     where sentence_source = '{sentence}'
                     """)
-        ticket_inputs = cur.fetchall()
+        
+        ticket_inputs = DatabaseService().run_select_statement(select_statement, None)
 
         dados = pd.DataFrame(ticket_inputs, columns=['ticket_id', 'sentence_embedding'])
-
-        # Close the connection
-        cur.close()
-        conn.close()
 
         # Initialize the progress bar
         with tqdm(total=len(dados), desc="Processing") as pbar:
@@ -86,11 +78,11 @@ class SimilarityFinder:
         final_df = pd.concat(results, ignore_index=True)
         group_df = pd.concat(results, ignore_index=True) 
 
-        # Export the final DataFrame to Excel
-        #final_df.to_excel('final_results.xlsx', index=False)
+        # # Delete the previous results from the Vectorized Database
+        # DatabaseService().run_dml_delete_statement(table='result_2')
 
-        # Insert the DataFrame directly into the Vectorized Database.
-        DatabaseService.run_dml_statement(final_df, 'result_2')
+        # # Insert the DataFrame directly into the Vectorized Database.
+        # DatabaseService().run_dml_statement(final_df, 'result_2')
 
         # List of all ticket_id for reference
         all_ticket_ids = set(group_df['ticket_id'])
@@ -118,11 +110,15 @@ class SimilarityFinder:
         # Export the final DataFrame to Excel 
         #df_grouped.to_excel('final_results_grouped.xlsx', index=False)
 
-        # Insert the DataFrame directly into the Vectorized Database.
-        DatabaseService.run_dml_statement(df_grouped, 'result_1')
+        # Save results to BigQuery
+        DatabaseService().save_dataframe_to_bigquery(df=df_grouped, table_id='result_1', if_exists='replace')
+        DatabaseService().save_dataframe_to_bigquery(df=final_df, table_id='result_2', if_exists='replace')
+
+        return
 
     def check_expected(self, row, all_ticket_ids):
         expected_ids = [int(x.strip()) for x in row['expected_id'].split(',') if x.strip().isdigit()]
         found_count = sum(1 for eid in expected_ids if eid in all_ticket_ids)
         not_found_count = sum(1 for eid in expected_ids if eid not in all_ticket_ids)
         return found_count, not_found_count
+    

@@ -33,7 +33,6 @@ from google.cloud import bigquery
 #from asyncio.log import logger
 #from util import transform_sentence
 #from logger import get_logger
-from logging import getLogger
 import psycopg2.extras as extras 
 import hashlib
 from langchain.docstore.document import Document
@@ -45,6 +44,9 @@ from langchain.chains.summarize import load_summarize_chain
 import textwrap
 import openai
 import warnings
+from joblib import Parallel, delayed
+import pandas_gbq
+
 warnings.filterwarnings("ignore")
 
 
@@ -66,6 +68,7 @@ class LoadData:
     
         return result
 
+
 class DatabaseService:
 
     def __init__(self):
@@ -80,7 +83,6 @@ class DatabaseService:
         return psycopg2.connect(self.connection_str)
 
     def run_select_statement(self, select_statement: str, vars=None):
-        logger = getLogger(__name__)
         
         try:
             conn = self._get_database_connection()
@@ -101,14 +103,37 @@ class DatabaseService:
 
         return result
     
-    def run_dml_statement(self, df: str, table: str, vars=None): 
-        logger = getLogger(__name__)
+    # Delete all records from a table
+    def run_dml_delete_statement(self, table: str):
         
         try:
             conn = self._get_database_connection()
             register_vector(conn)
         except Exception as e:
-            logger.error(f'Connecting to database failed. {e}')
+            print(f'Connecting to database failed. {e}')
+            return []
+        
+        # SQL query to execute 
+        query = f'delete from {table}' 
+        cursor = conn.cursor() 
+        try: 
+            cursor.execute(query)
+            conn.commit() 
+        except (Exception, psycopg2.DatabaseError) as error: 
+            print("Error: %s" % error) 
+            conn.rollback() 
+            cursor.close() 
+            return 1
+        
+        return
+    
+    def run_dml_statement(self, df: str, table: str, vars=None): 
+        
+        try:
+            conn = self._get_database_connection()
+            register_vector(conn)
+        except Exception as e:
+            print(f'Connecting to database failed. {e}')
             return []
         
         tuples = [tuple(x) for x in df.to_numpy()] 
@@ -126,11 +151,11 @@ class DatabaseService:
             cursor.close() 
             return 1
         
-        query = "SELECT COUNT(*) as cnt FROM %s;" % (table) 
-        cursor.execute(query)
-        num_records = cursor.fetchone()[0]
+        # query = "SELECT COUNT(*) as cnt FROM %s;" % (table) 
+        # cursor.execute(query)
+        # num_records = cursor.fetchone()[0]
 
-        print("Number of vector records in table: ", num_records,"\n")
+        # print("Number of vector records in table: ", num_records,"\n")
 
         # Create an index on the data for faster retrieval
 
@@ -149,12 +174,23 @@ class DatabaseService:
         cursor.close()  
 
         return
+    
+    def save_dataframe_to_bigquery(self, df, table_id, if_exists='replace'):
+        
+        # Create credentials
+        credentials = service_account.Credentials.from_service_account_file('/Users/rodrigomoraes/Library/CloudStorage/GoogleDrive-rg.moraes@totvs.com.br/My Drive/TOTVS LABS/key_SA_GCP/labs-poc-09feb4e7688e.json')
+
+        project_id = 'labs-poc'
+        dataset_id = 'custom_data'
+
+        # Save the DataFrame to BigQuery
+        pandas_gbq.to_gbq(df, f'{dataset_id}.{table_id}', project_id=project_id, if_exists=if_exists, credentials=credentials)
 
 class DocumentSearchService:
 
     def __init__(self):
         self.database_service = DatabaseService()
-        self.threshold = 45
+        self.threshold = 65
 
     def ticket_summarization(self, sentence: str, llm):
         """Returns ticket summarization by comment.
@@ -438,11 +474,11 @@ class DocumentSearchService:
                     )
 
         # Usa o joblib para paralelizar o processamento. 10 jobs por vez usando o backend threading.
-        Parallel(n_jobs=10, backend='threading')(delayed(embedding_sentence)(
+        Parallel(n_jobs=10, backend='threading')(delayed(DocumentSearchService().embedding_sentence)(
                 dados,i, llm, embedding)
                 for i, row in dados.iterrows())
 
         # Gera dados na tabela de tickets similares, estes dados vem da planilha enviada para busca de ticket similares
-        similarity_ticket()
+        DocumentSearchService().similarity_ticket()
 
         return 
