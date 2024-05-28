@@ -15,3 +15,6 @@ openai
 langchain_openai
 openpyxl
 python-json-logger
+langchain_community
+langchain_openai
+logging

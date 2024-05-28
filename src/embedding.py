@@ -15,13 +15,13 @@ import db_dtypes
 # import tiktoken
 # import pandas_gbq
 # from unidecode import unidecode
-# from langchain.chains.combine_documents.base import BaseCombineDocumentsChain
-# from langchain.chains.question_answering import load_qa_chain
+from langchain.chains.combine_documents.base import BaseCombineDocumentsChain
+from langchain.chains.question_answering import load_qa_chain
 # from langchain.chat_models import ChatOpenAI
-# from langchain.prompts import PromptTemplate
-# from langchain.schema import Document
-# from langchain.text_splitter import CharacterTextSplitter
-# from langchain_community.vectorstores import DocArrayInMemorySearch
+from langchain.prompts import PromptTemplate
+from langchain.schema import Document
+from langchain.text_splitter import CharacterTextSplitter
+from langchain_community.vectorstores import DocArrayInMemorySearch
 # from langchain_openai import ChatOpenAI
 from langchain_openai import OpenAIEmbeddings
 import psycopg2
@@ -32,15 +32,16 @@ from google.oauth2 import service_account
 from google.cloud import bigquery
 #from asyncio.log import logger
 #from util import transform_sentence
-from logger import get_logger
+#from logger import get_logger
+from logging import getLogger
 import psycopg2.extras as extras 
-# import hashlib
-# from langchain.docstore.document import Document
-# from langchain import OpenAI, PromptTemplate, LLMChain
-# from langchain.text_splitter import CharacterTextSplitter
-# from langchain.chains.mapreduce import MapReduceChain
-# from langchain.prompts import PromptTemplate
-# from langchain.chains.summarize import load_summarize_chain
+import hashlib
+from langchain.docstore.document import Document
+from langchain import OpenAI, PromptTemplate, LLMChain
+from langchain.text_splitter import CharacterTextSplitter
+from langchain.chains.mapreduce import MapReduceChain
+from langchain.prompts import PromptTemplate
+from langchain.chains.summarize import load_summarize_chain
 import textwrap
 import openai
 import warnings
@@ -49,7 +50,7 @@ warnings.filterwarnings("ignore")
 
 class LoadData:
     
-    def run_select_statement(select_statement: str):
+    def run_select_bigquery(select_statement: str):
         credentials = service_account.Credentials.from_service_account_file('/Users/rodrigomoraes/Library/CloudStorage/GoogleDrive-rg.moraes@totvs.com.br/My Drive/TOTVS LABS/key_SA_GCP/labs-poc-09feb4e7688e.json')
 
         project_id = 'labs-poc'
@@ -79,7 +80,7 @@ class DatabaseService:
         return psycopg2.connect(self.connection_str)
 
     def run_select_statement(self, select_statement: str, vars=None):
-        #logger = get_logger(__name__)
+        logger = getLogger(__name__)
         
         try:
             conn = self._get_database_connection()
@@ -101,7 +102,7 @@ class DatabaseService:
         return result
     
     def run_dml_statement(self, df: str, table: str, vars=None): 
-        logger = get_logger(__name__)
+        logger = getLogger(__name__)
         
         try:
             conn = self._get_database_connection()
@@ -153,7 +154,7 @@ class DocumentSearchService:
 
     def __init__(self):
         self.database_service = DatabaseService()
-        self.threshold = 65
+        self.threshold = 45
 
     def ticket_summarization(self, sentence: str, llm):
         """Returns ticket summarization by comment.
@@ -230,7 +231,7 @@ class DocumentSearchService:
                                     ) as filtered_kb
                                 WHERE score > {threshold/100};
                             '''
-                                            
+
         result = self.database_service.run_select_statement(select_statement, (query_vec,))
         
         return pd.DataFrame(result)
@@ -277,7 +278,7 @@ class DocumentSearchService:
                                 `labs-poc.custom_data.tickets_similares`
                             """)
         
-        df = LoadData.run_select_statement(select_statement).to_dataframe()
+        df = LoadData.run_select_bigquery(select_statement).to_dataframe()
 
         # Grava o resultado dos dados coletados no BQ e faz insert do Dataframe diretamente no Banco Vetorizado
         DatabaseService().run_dml_statement(df, 'tickets_similares')
@@ -418,7 +419,7 @@ class DocumentSearchService:
 
                             """)
         # Faz a leitura dos daods no BQ
-        df = LoadData.run_select_statement(select_statement).to_dataframe()
+        df = LoadData.run_select_bigquery(select_statement).to_dataframe()
 
         dados = df
 

@@ -47,8 +47,11 @@ class SimilarityFinder:
         return pd.DataFrame()  # Return an empty DataFrame if no results are found
 
     def process_data(self, product, module, sentence):
+        # Create an instance of DatabaseService
+        DatabaseService = DatabaseService()
+
         # Connecting to the database
-        conn = DatabaseService()._get_database_connection()
+        conn = DatabaseService._get_database_connection()
         cur = conn.cursor()
 
         # Execute the query to fetch the embeddings for each ticket_id
@@ -87,7 +90,7 @@ class SimilarityFinder:
         #final_df.to_excel('final_results.xlsx', index=False)
 
         # Insert the DataFrame directly into the Vectorized Database.
-        DatabaseService().run_dml_statement(final_df, 'result_2')
+        DatabaseService.run_dml_statement(final_df, 'result_2')
 
         # List of all ticket_id for reference
         all_ticket_ids = set(group_df['ticket_id'])
@@ -116,7 +119,7 @@ class SimilarityFinder:
         #df_grouped.to_excel('final_results_grouped.xlsx', index=False)
 
         # Insert the DataFrame directly into the Vectorized Database.
-        DatabaseService().run_dml_statement(df_grouped, 'result_1')
+        DatabaseService.run_dml_statement(df_grouped, 'result_1')
 
     def check_expected(self, row, all_ticket_ids):
         expected_ids = [int(x.strip()) for x in row['expected_id'].split(',') if x.strip().isdigit()]
