@@ -1,0 +1,15 @@
+Olá Daniel,  Pelo que entendi o pedido foi reprovado e os senhores aprovaram forçadamente para faturar parcialmente. Depois de faturar o pedido voltou para reprovadao conforme a configuração do campo "Reabre avaliação de crédito" do CM0101. Veja a documentação abaixo sobre o campo:  Cross Segmentos - Linha Datasul - MCM - Função do parâmetro Reabre avaliação de crédito  Qualquer dúvida me retorne.  Atenciosamente  Sandra Regina Barsch Suporte Vendas & CRM Oi Sandra, bom dia
+ 
+ Obrigado pelo retorno. Segue print da tela cm0101, estabelecimento 600.
+ 
+ Obrigado,
+ 
+ Daniel Dias Boa tarde,  Poderia me enviar a tela do CM0101 do estabelecimento do pedido (600).  Fico no aguardo  Atenciosamente  Sandra Regina Barsch Suporte Vendas & CRM Boa tarde,
+ 
+ No dia 08/03 o pedido de venda estava bloqueado no crédito. Mesmo bloqueado, foi possível seguir com o embarque e faturamento do pedido.
+ 
+ Conseguimos gerar aqui o spp do pedido para apioar na análise. Por gentileza poderiam verificar o que pode ter ocorrido no crédito?
+ 
+ Agradeço e fico no aguardo.
+ 
+ Daniel Dias
