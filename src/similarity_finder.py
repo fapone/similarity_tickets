@@ -84,7 +84,10 @@ class SimilarityFinder:
         group_df = pd.concat(results, ignore_index=True) 
 
         # Export the final DataFrame to Excel
-        final_df.to_excel('final_results.xlsx', index=False)
+        #final_df.to_excel('final_results.xlsx', index=False)
+
+        # Insert the DataFrame directly into the Vectorized Database.
+        DatabaseService().run_dml_statement(final_df, 'result_2')
 
         # List of all ticket_id for reference
         all_ticket_ids = set(group_df['ticket_id'])
@@ -109,8 +112,11 @@ class SimilarityFinder:
             axis=1
         )
 
-        # Export the final DataFrame to Excel
-        df_grouped.to_excel('final_results_grouped.xlsx', index=False)
+        # Export the final DataFrame to Excel 
+        #df_grouped.to_excel('final_results_grouped.xlsx', index=False)
+
+        # Insert the DataFrame directly into the Vectorized Database.
+        DatabaseService().run_dml_statement(df_grouped, 'result_1')
 
     def check_expected(self, row, all_ticket_ids):
         expected_ids = [int(x.strip()) for x in row['expected_id'].split(',') if x.strip().isdigit()]

@@ -2,4 +2,16 @@ numpy
 pandas
 tqdm
 joblib
-
+requests
+db_dtypes
+langchain
+psycopg2-binary
+pgvector
+google.cloud
+bigquery
+unidecode
+logger
+openai
+langchain_openai
+openpyxl
+python-json-logger

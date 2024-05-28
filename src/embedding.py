@@ -1,22 +1,28 @@
+import sys
+import os
+
+# Adiciona o diretório 'src' ao caminho do sistema
+sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '..', 'src')))
+
 import copy
 import requests
 import numpy as np
 import pandas as pd
 import db_dtypes
-import ftfy
-import re
-import six
-import tiktoken
-import pandas_gbq
-from unidecode import unidecode
-from langchain.chains.combine_documents.base import BaseCombineDocumentsChain
-from langchain.chains.question_answering import load_qa_chain
-from langchain.chat_models import ChatOpenAI
-from langchain.prompts import PromptTemplate
-from langchain.schema import Document
-from langchain.text_splitter import CharacterTextSplitter
-from langchain_community.vectorstores import DocArrayInMemorySearch
-from langchain_openai import ChatOpenAI
+# import ftfy
+# import re
+# import six
+# import tiktoken
+# import pandas_gbq
+# from unidecode import unidecode
+# from langchain.chains.combine_documents.base import BaseCombineDocumentsChain
+# from langchain.chains.question_answering import load_qa_chain
+# from langchain.chat_models import ChatOpenAI
+# from langchain.prompts import PromptTemplate
+# from langchain.schema import Document
+# from langchain.text_splitter import CharacterTextSplitter
+# from langchain_community.vectorstores import DocArrayInMemorySearch
+# from langchain_openai import ChatOpenAI
 from langchain_openai import OpenAIEmbeddings
 import psycopg2
 from pgvector.psycopg2 import register_vector
@@ -25,20 +31,21 @@ import os
 from google.oauth2 import service_account
 from google.cloud import bigquery
 #from asyncio.log import logger
-from util import transform_sentence
+#from util import transform_sentence
 from logger import get_logger
 import psycopg2.extras as extras 
-import hashlib
-from langchain.docstore.document import Document
-from langchain import OpenAI, PromptTemplate, LLMChain
-from langchain.text_splitter import CharacterTextSplitter
-from langchain.chains.mapreduce import MapReduceChain
-from langchain.prompts import PromptTemplate
-from langchain.chains.summarize import load_summarize_chain
+# import hashlib
+# from langchain.docstore.document import Document
+# from langchain import OpenAI, PromptTemplate, LLMChain
+# from langchain.text_splitter import CharacterTextSplitter
+# from langchain.chains.mapreduce import MapReduceChain
+# from langchain.prompts import PromptTemplate
+# from langchain.chains.summarize import load_summarize_chain
 import textwrap
 import openai
 import warnings
 warnings.filterwarnings("ignore")
+
 
 class LoadData:
     
@@ -259,114 +266,111 @@ class DocumentSearchService:
         return results
     
 
-from joblib import Parallel, delayed
-import time
+    # Create similar tickets from the sent spreadsheet
+    def similarity_ticket():
 
-# Create similar tickets from the sent spreadsheet
-def similarity_ticket():
+        select_statement = ("""
+                            SELECT
+                                CAST(ticket_id AS INT64) AS ticket_id,
+                                expected_id
+                            FROM
+                                `labs-poc.custom_data.tickets_similares`
+                            """)
+        
+        df = LoadData.run_select_statement(select_statement).to_dataframe()
 
-    select_statement = ("""
-                        SELECT
-                            CAST(ticket_id AS INT64) AS ticket_id,
-                            expected_id
-                        FROM
-                            `labs-poc.custom_data.tickets_similares`
-                        """)
-    
-    df = LoadData.run_select_statement(select_statement).to_dataframe()
+        # Grava o resultado dos dados coletados no BQ e faz insert do Dataframe diretamente no Banco Vetorizado
+        DatabaseService().run_dml_statement(df, 'tickets_similares')
 
-    # Grava o resultado dos dados coletados no BQ e faz insert do Dataframe diretamente no Banco Vetorizado
-    DatabaseService().run_dml_statement(df, 'tickets_similares')
+        return df
 
-    return df
+    def embedding_sentence(result_df, i, llm, embedding):
 
-def embedding_sentence(result_df, i, llm, embedding):
+        time.sleep(2)
 
-    time.sleep(2)
+        # Cria os embeddings para inserir os registros.
+        #for i, row in result_df.iterrows():
+        sentence = result_df.at[i,'ticket_comment']
+        summary = DocumentSearchService().ticket_summarization(sentence, llm)
 
-    # Cria os embeddings para inserir os registros.
-    #for i, row in result_df.iterrows():
-    sentence = result_df.at[i,'ticket_comment']
-    summary = DocumentSearchService().ticket_summarization(sentence, llm)
+        # Cria embeddings para ticket_comment
+        query_vec = embedding.embed_query(sentence)
+        query_vec = np.array(query_vec)
 
-    # Cria embeddings para ticket_comment
-    query_vec = embedding.embed_query(sentence)
-    query_vec = np.array(query_vec)
+        # Atualiza os valores da linha atual
+        hash_concat = str(result_df.at[i,'ticket_id']) + sentence
+        hash_id = hashlib.md5(hash_concat.encode('utf-8')).hexdigest()
+        result_df.at[i,'ticket_sentence_hash'] =  hash_id
+        result_df.at[i,'summary'] = summary
+        result_df.at[i,'sentence_embedding'] = query_vec
+        result_df.at[i,'sentence_source'] = 'ticket_comment'
 
-    # Atualiza os valores da linha atual
-    hash_concat = str(result_df.at[i,'ticket_id']) + sentence
-    hash_id = hashlib.md5(hash_concat.encode('utf-8')).hexdigest()
-    result_df.at[i,'ticket_sentence_hash'] =  hash_id
-    result_df.at[i,'summary'] = summary
-    result_df.at[i,'sentence_embedding'] = query_vec
-    result_df.at[i,'sentence_source'] = 'ticket_comment'
+        # Grava o resultado dos dados coletados no BQ e faz insert do Dataframe diretamente no Banco Vetorizado
+        DatabaseService().run_dml_statement(result_df.iloc[[i]], 'tickets_embeddings')
 
-    # Grava o resultado dos dados coletados no BQ e faz insert do Dataframe diretamente no Banco Vetorizado
-    DatabaseService().run_dml_statement(result_df.iloc[[i]], 'tickets_embeddings')
+        # Cria nova linha com dados do Assunto
+        ultima_linha = result_df.loc[i]
+        nova_linha = ultima_linha.copy()
+        sentence = nova_linha['subject']
+        hash_concat = str(nova_linha['ticket_id']) + sentence
+        hash_id = hashlib.md5(hash_concat.encode('utf-8')).hexdigest()
 
-    # Cria nova linha com dados do Assunto
-    ultima_linha = result_df.loc[i]
-    nova_linha = ultima_linha.copy()
-    sentence = nova_linha['subject']
-    hash_concat = str(nova_linha['ticket_id']) + sentence
-    hash_id = hashlib.md5(hash_concat.encode('utf-8')).hexdigest()
+        # Cria embeddings para a sentença
+        query_vec = embedding.embed_query(sentence)
+        query_vec = np.array(query_vec)
 
-    # Cria embeddings para a sentença
-    query_vec = embedding.embed_query(sentence)
-    query_vec = np.array(query_vec)
+        # Atualiza os valores da linha atual
+        nova_linha['ticket_sentence_hash'] =  hash_id
+        nova_linha['summary'] = summary
+        nova_linha['sentence_embedding'] = query_vec
+        nova_linha['sentence_source'] = 'subject'
+        result_df = result_df.append(nova_linha, ignore_index=True)
 
-    # Atualiza os valores da linha atual
-    nova_linha['ticket_sentence_hash'] =  hash_id
-    nova_linha['summary'] = summary
-    nova_linha['sentence_embedding'] = query_vec
-    nova_linha['sentence_source'] = 'subject'
-    result_df = result_df.append(nova_linha, ignore_index=True)
+        # Grava o resultado dos dados coletados no BQ e faz insert do Dataframe diretamente no Banco Vetorizado
+        DatabaseService().run_dml_statement(result_df.tail(1), 'tickets_embeddings')
 
-    # Grava o resultado dos dados coletados no BQ e faz insert do Dataframe diretamente no Banco Vetorizado
-    DatabaseService().run_dml_statement(result_df.tail(1), 'tickets_embeddings')
+        # Cria nova linha com dados do Resumo
+        sentence = summary
+        ultima_linha = result_df.loc[i]
+        nova_linha = ultima_linha.copy()
+        hash_concat = str(nova_linha['ticket_id']) + sentence
+        hash_id = hashlib.md5(hash_concat.encode('utf-8')).hexdigest()
 
-    # Cria nova linha com dados do Resumo
-    sentence = summary
-    ultima_linha = result_df.loc[i]
-    nova_linha = ultima_linha.copy()
-    hash_concat = str(nova_linha['ticket_id']) + sentence
-    hash_id = hashlib.md5(hash_concat.encode('utf-8')).hexdigest()
+        # Cria embeddings para a sentença
+        query_vec = embedding.embed_query(sentence)
+        query_vec = np.array(query_vec)
 
-    # Cria embeddings para a sentença
-    query_vec = embedding.embed_query(sentence)
-    query_vec = np.array(query_vec)
+        nova_linha['ticket_sentence_hash'] =  hash_id
+        nova_linha['summary'] = summary
+        nova_linha['sentence_embedding'] = query_vec
+        nova_linha['sentence_source'] = 'summary'
+        result_df = result_df.append(nova_linha, ignore_index=True)
 
-    nova_linha['ticket_sentence_hash'] =  hash_id
-    nova_linha['summary'] = summary
-    nova_linha['sentence_embedding'] = query_vec
-    nova_linha['sentence_source'] = 'summary'
-    result_df = result_df.append(nova_linha, ignore_index=True)
+        # Grava o resultado dos dados coletados no BQ e faz insert do Dataframe diretamente no Banco Vetorizado
+        DatabaseService().run_dml_statement(result_df.tail(1), 'tickets_embeddings')
 
-    # Grava o resultado dos dados coletados no BQ e faz insert do Dataframe diretamente no Banco Vetorizado
-    DatabaseService().run_dml_statement(result_df.tail(1), 'tickets_embeddings')
+        # Cria nova linha com dados do primeiro comentario
+        ultima_linha = result_df.loc[i]
+        nova_linha = ultima_linha.copy()
+        sentence = nova_linha['first_comment']
+        hash_concat = str(nova_linha['ticket_id']) + sentence + summary
+        hash_id = hashlib.md5(hash_concat.encode('utf-8')).hexdigest()
 
-    # Cria nova linha com dados do primeiro comentario
-    ultima_linha = result_df.loc[i]
-    nova_linha = ultima_linha.copy()
-    sentence = nova_linha['first_comment']
-    hash_concat = str(nova_linha['ticket_id']) + sentence + summary
-    hash_id = hashlib.md5(hash_concat.encode('utf-8')).hexdigest()
+        # Cria embeddings para a sentença
+        query_vec = embedding.embed_query(sentence)
+        query_vec = np.array(query_vec)
 
-    # Cria embeddings para a sentença
-    query_vec = embedding.embed_query(sentence)
-    query_vec = np.array(query_vec)
+        # Atualiza os valores da linha atual
+        nova_linha['ticket_sentence_hash'] =  hash_id
+        nova_linha['summary'] = summary
+        nova_linha['sentence_embedding'] = query_vec
+        nova_linha['sentence_source'] = 'first_comment'
+        result_df = result_df.append(nova_linha, ignore_index=True)
 
-    # Atualiza os valores da linha atual
-    nova_linha['ticket_sentence_hash'] =  hash_id
-    nova_linha['summary'] = summary
-    nova_linha['sentence_embedding'] = query_vec
-    nova_linha['sentence_source'] = 'first_comment'
-    result_df = result_df.append(nova_linha, ignore_index=True)
+        # Grava o resultado dos dados coletados no BQ e faz insert do Dataframe diretamente no Banco Vetorizado
+        DatabaseService().run_dml_statement(result_df.tail(1), 'tickets_embeddings')
 
-    # Grava o resultado dos dados coletados no BQ e faz insert do Dataframe diretamente no Banco Vetorizado
-    DatabaseService().run_dml_statement(result_df.tail(1), 'tickets_embeddings')
-
-    return result_df
+        return result_df
 
     def create_embeddings():
         select_statement = ("""
