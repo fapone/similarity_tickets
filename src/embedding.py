@@ -46,6 +46,7 @@ import openai
 import warnings
 from joblib import Parallel, delayed
 import pandas_gbq
+import time
 
 warnings.filterwarnings("ignore")
 
