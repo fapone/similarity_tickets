@@ -1,7 +1,6 @@
 import sys
 import os
 
-# Adiciona o diretório 'src' ao caminho do sistema
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '..', 'src')))
 
 from similarity_finder import SimilarityFinder

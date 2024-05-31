@@ -27,15 +27,15 @@ class SimilarityFinder:
             # Sort the DataFrame by score in descending order
             df_sorted = results_df.sort_values(by='score', ascending=False)
 
-            # Select the top three ticket_ids
-            top_1 = df_sorted.index[0]
-            top_2 = df_sorted.index[1] if len(df_sorted) > 1 else None
-            top_3 = df_sorted.index[2] if len(df_sorted) > 2 else None
+            # # Select the top three ticket_ids
+            # top_1 = df_sorted.index[0]
+            # top_2 = df_sorted.index[1] if len(df_sorted) > 1 else None
+            # top_3 = df_sorted.index[2] if len(df_sorted) > 2 else None
 
-            # Additional columns corresponding only to found indexes
-            results_df['top_1'] = results_df.index == top_1
-            results_df['top_2'] = results_df.index == top_2 if top_2 else False
-            results_df['top_3'] = results_df.index == top_3 if top_3 else False
+            # # Additional columns corresponding only to found indexes
+            # results_df['top_1'] = results_df.index == top_1
+            # results_df['top_2'] = results_df.index == top_2 if top_2 else False
+            # results_df['top_3'] = results_df.index == top_3 if top_3 else False
 
             # Add top ticket IDs to the DataFrame
             results_df['sentence'] = sentence
@@ -78,37 +78,37 @@ class SimilarityFinder:
         final_df = pd.concat(results, ignore_index=True)
         group_df = pd.concat(results, ignore_index=True) 
 
-        # # Delete the previous results from the Vectorized Database
-        # DatabaseService().run_dml_delete_statement(table='result_2')
+        # # Apply function and create found and not found columns
+        final_df['found'] = final_df.apply(lambda row: 1 if self.check_found(row) else 0, axis=1)
 
-        # # Insert the DataFrame directly into the Vectorized Database.
-        # DatabaseService().run_dml_statement(final_df, 'result_2')
+        # # Delete the previous results from the Vectorized Database
+        # DatabaseService().run_dml_delete_statement(table='result_1')
+        # DatabaseService().run_dml_delete_statement(table='result_2')
 
         # List of all ticket_id for reference
         all_ticket_ids = set(group_df['ticket_id'])
 
         # Apply function and create found and not found columns
-        group_df[['found', 'not_found']] = group_df.apply(lambda row: pd.Series(self.check_expected(row, all_ticket_ids)), axis=1)
+        group_df[['found']] = group_df.apply(lambda row: pd.Series(self.check_expected(row, all_ticket_ids)), axis=1)
 
         # Keep only the necessary columns
-        group_df = group_df[['expected_id', 'sentence', 'target', 'found', 'not_found']]
+        group_df = group_df[['expected_id', 'sentence', 'target', 'found']]
 
         # Group by target and aggregate the results
         df_grouped = group_df.groupby('target').agg({
             'expected_id': 'first',
             'sentence': 'first',
-            'found': 'first',
-            'not_found': 'first'
+            'found': 'first'
         }).reset_index()
 
-        # Add a column accuracy
-        df_grouped['accuracy'] = df_grouped.apply(
-            lambda row: (row['found'] / (row['found'] + row['not_found'])) if (row['found'] + row['not_found']) > 0 else 0, 
-            axis=1
-        )
+        # Calculate calculate_top_k - top 3 e Top 5
+        # df_grouped['ptop3'] = df_grouped.apply(lambda row: self.calculate_ptopk(final_df, row['target'], k=3), axis=1)
+        # df_grouped['ptop5'] = df_grouped.apply(lambda row: self.calculate_ptopk(final_df, row['target'], k=5), axis=1)
+        df_grouped['ptop3'], df_grouped['ptop5'] = zip(*df_grouped.apply(lambda row: self.calculate_ptopk(final_df, row['target'], [3, 5]), axis=1))
 
-        # Export the final DataFrame to Excel 
-        #df_grouped.to_excel('final_results_grouped.xlsx', index=False)
+ 
+        # Apply the function to create columns 'top_1' and 'top_3'
+        df_grouped[['top_1', 'top_3']] = df_grouped.apply(lambda row: pd.Series(self.calculate_topk(final_df, row['target'])), axis=1)
 
         # Save results to BigQuery
         DatabaseService().save_dataframe_to_bigquery(df=df_grouped, table_id='result_1', if_exists='replace')
@@ -116,9 +116,52 @@ class SimilarityFinder:
 
         return
 
+    # This function extracts expected ticket IDs, checks their presence in all_ticket_ids (converted to a set), 
+    # and returns counts of found and not found IDs.
     def check_expected(self, row, all_ticket_ids):
-        expected_ids = [int(x.strip()) for x in row['expected_id'].split(',') if x.strip().isdigit()]
-        found_count = sum(1 for eid in expected_ids if eid in all_ticket_ids)
-        not_found_count = sum(1 for eid in expected_ids if eid not in all_ticket_ids)
-        return found_count, not_found_count
+        try:
+            expected_ids = [int(x.strip()) for x in row['expected_id'].split(',') if x.strip().isdigit()]
+        except KeyError:
+            raise ValueError("The expected_id key is missing.")
+        except ValueError:
+            raise ValueError("The expected_id field contains non-numeric values.")
+        
+        all_ticket_ids_set = set(all_ticket_ids)
+        
+        found_count = sum(1 for eid in expected_ids if eid in all_ticket_ids_set)
+
+        return found_count
     
+    # Function to check if the ticket_id is in the expected_id
+    def check_found(self, row):
+        expected_ids = [int(x.strip()) for x in row['expected_id'].split(',') if x.strip().isdigit()]
+        return row['ticket_id'] in expected_ids
+
+    # Function to calculate the percentage of 'found' records in the top k records
+    def calculate_ptopk(self, final_df, target, k_values):
+        filtered_df = final_df[final_df['target'] == target]
+        filtered_df_found_1 = filtered_df[filtered_df['found'] == 1]  # Filtra apenas as linhas onde found == 1
+        
+        ptopk_values = []
+        for k in k_values:
+            n = min(len(filtered_df_found_1), k)  # Considera apenas as linhas filtradas onde found == 1
+            if n == 0:
+                ptopk_values.append(0)
+            else:
+                ptopk_values.append(sum(filtered_df_found_1['found'].head(n)) / n)
+        
+        return ptopk_values
+
+    # Function to calculate top_1 and top_3
+    def calculate_topk(self, final_df, target):
+        filtered_df = final_df[final_df['target'] == target]
+        if len(filtered_df) < 3:
+            top_1 = filtered_df.iloc[0]['found'] == 1 if not filtered_df.empty else False
+            top_3 = False
+        else:
+            top_1 = filtered_df.iloc[0]['found'] == 1 if not filtered_df.empty else False
+            top_3 = (filtered_df['found'].head(3).sum() >= 3) if not filtered_df.empty else False
+        return top_1, top_3
+
+
+        
