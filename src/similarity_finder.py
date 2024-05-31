@@ -102,11 +102,8 @@ class SimilarityFinder:
         }).reset_index()
 
         # Calculate calculate_top_k - top 3 e Top 5
-        # df_grouped['ptop3'] = df_grouped.apply(lambda row: self.calculate_ptopk(final_df, row['target'], k=3), axis=1)
-        # df_grouped['ptop5'] = df_grouped.apply(lambda row: self.calculate_ptopk(final_df, row['target'], k=5), axis=1)
         df_grouped['ptop3'], df_grouped['ptop5'] = zip(*df_grouped.apply(lambda row: self.calculate_ptopk(final_df, row['target'], [3, 5]), axis=1))
 
- 
         # Apply the function to create columns 'top_1' and 'top_3'
         df_grouped[['top_1', 'top_3']] = df_grouped.apply(lambda row: pd.Series(self.calculate_topk(final_df, row['target'])), axis=1)
 
@@ -140,11 +137,11 @@ class SimilarityFinder:
     # Function to calculate the percentage of 'found' records in the top k records
     def calculate_ptopk(self, final_df, target, k_values):
         filtered_df = final_df[final_df['target'] == target]
-        filtered_df_found_1 = filtered_df[filtered_df['found'] == 1]  # Filtra apenas as linhas onde found == 1
+        filtered_df_found_1 = filtered_df[filtered_df['found'] == 1]
         
         ptopk_values = []
         for k in k_values:
-            n = min(len(filtered_df_found_1), k)  # Considera apenas as linhas filtradas onde found == 1
+            n = min(len(filtered_df_found_1), k)
             if n == 0:
                 ptopk_values.append(0)
             else:
