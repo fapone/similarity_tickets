@@ -27,16 +27,6 @@ class SimilarityFinder:
             # Sort the DataFrame by score in descending order
             df_sorted = results_df.sort_values(by='score', ascending=False)
 
-            # # Select the top three ticket_ids
-            # top_1 = df_sorted.index[0]
-            # top_2 = df_sorted.index[1] if len(df_sorted) > 1 else None
-            # top_3 = df_sorted.index[2] if len(df_sorted) > 2 else None
-
-            # # Additional columns corresponding only to found indexes
-            # results_df['top_1'] = results_df.index == top_1
-            # results_df['top_2'] = results_df.index == top_2 if top_2 else False
-            # results_df['top_3'] = results_df.index == top_3 if top_3 else False
-
             # Add top ticket IDs to the DataFrame
             results_df['sentence'] = sentence
             results_df['target'] = ticket_id
@@ -80,10 +70,6 @@ class SimilarityFinder:
 
         # # Apply function and create found and not found columns
         final_df['found'] = final_df.apply(lambda row: 1 if self.check_found(row) else 0, axis=1)
-
-        # # Delete the previous results from the Vectorized Database
-        # DatabaseService().run_dml_delete_statement(table='result_1')
-        # DatabaseService().run_dml_delete_statement(table='result_2')
 
         # List of all ticket_id for reference
         all_ticket_ids = set(group_df['ticket_id'])
@@ -135,6 +121,7 @@ class SimilarityFinder:
         return row['ticket_id'] in expected_ids
 
     # Function to calculate the percentage of 'found' records in the top k records
+    #no caso do target = 19432291 o ptop5 deve ser 80% porque a posicao 4 ficou com zero
     def calculate_ptopk(self, final_df, target, k_values):
         filtered_df = final_df[final_df['target'] == target]
         filtered_df_found_1 = filtered_df[filtered_df['found'] == 1]
@@ -150,6 +137,7 @@ class SimilarityFinder:
         return ptopk_values
 
     # Function to calculate top_1 and top_3
+    #ajustar para top
     def calculate_topk(self, final_df, target):
         filtered_df = final_df[final_df['target'] == target]
         if len(filtered_df) < 3:
