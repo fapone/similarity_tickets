@@ -97,7 +97,7 @@ class SimilarityFinder:
         DatabaseService().save_dataframe_to_bigquery(df=df_grouped, table_id='result_1', if_exists='replace')
         DatabaseService().save_dataframe_to_bigquery(df=final_df, table_id='result_2', if_exists='replace')
 
-        return
+        return df_grouped
 
     # This function extracts expected ticket IDs, checks their presence in all_ticket_ids (converted to a set), 
     # and returns counts of found and not found IDs.
