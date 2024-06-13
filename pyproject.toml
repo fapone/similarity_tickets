@@ -1,0 +1,33 @@
+[tool.poetry]
+name = "tickets-similares"
+version = "0.1.0"
+description = "Packages for the similar tickets project"
+authors = ["fapone <rg.moraes82@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+numpy = "^1.26.4"
+pandas = "^2.2.2"
+tqdm = "^4.66.4"
+joblib = "^1.4.2"
+requests = "^2.32.3"
+db-dtypes = "^1.2.0"
+langchain = "^0.2.3"
+psycopg2-binary = "^2.9.9"
+pgvector = "^0.2.5"
+google-cloud = "^0.34.0"
+unidecode = "^1.3.8"
+logger = "^1.4"
+openai = "^1.34.0"
+langchain-openai = "^0.1.8"
+openpyxl = "^3.1.4"
+python-json-logger = "^2.0.7"
+langchain-community = "^0.2.4"
+logging = "^0.4.9.6"
+pandas-gbq = "^0.23.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
