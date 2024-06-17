@@ -26,6 +26,7 @@ python-json-logger = "^2.0.7"
 langchain-community = "^0.2.4"
 logging = "^0.4.9.6"
 pandas-gbq = "^0.23.1"
+load-dotenv = "^0.1.0"
 
 
 [build-system]

@@ -6,3 +6,4 @@
 *.xlsx
 *.lock
 /.env
+*.csv

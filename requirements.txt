@@ -17,3 +17,4 @@ openpyxl
 python-json-logger
 langchain-community
 pandas_gbq
+load_dotenv
