@@ -12,20 +12,19 @@ class SimilarityFinder:
     def __init__(self):
         pass
 
-    def find_similarity(self, df, product, module, sentence, index, pbar):
-        time.sleep(2)
+    def find_similarity(self, table_name, sentence_field, row, use_product, use_module, threshold):
 
-        ticket_id = df.at[index, 'ticket_id']
-        query_vec = np.array(df.at[index, 'sentence_embedding'])
+        ticket_id = row['ticket_id']
+        sentence = row['sentence']
+        product = row['product']
+        module = row['module']
+        query_vec = np.array(row['sentence_embedding'])
 
         # Find similar tickets using cosine similarity
-        documents_df = DocumentSearchService().find_tickets_for_query(query_vec, product, module, k=20, similarity='<=>', ticket_id=ticket_id, batch=True)
+        documents_df = DocumentSearchService().find_tickets_for_query(table_name, query_vec, sentence_field, product, module, use_product, use_module, threshold, k=20, similarity='<=>', ticket_id=ticket_id, batch=True)
         
         if not documents_df.empty:
             results_df = documents_df
-
-            # Sort the DataFrame by score in descending order
-            df_sorted = results_df.sort_values(by='score', ascending=False)
 
             # Add top ticket IDs to the DataFrame
             results_df['sentence'] = sentence
@@ -38,115 +37,129 @@ class SimilarityFinder:
 
         return pd.DataFrame()  # Return an empty DataFrame if no results are found
 
-    def process_data(self, product, module, sentence):
+    def process_data(self, table_name, sentence_source, use_product, use_module, threshold):
+
+        sentence_source_statement = f"WHERE sentence_source = '{sentence_source}'" if sentence_source else ""
 
         # Select the ticket_id and sentence_embedding from the Vectorized Database
-        select_statement = (f"""
-                    select te.ticket_id, sentence_embedding 
-                    from tickets_embeddings te
-                    INNER JOIN tickets_similares ts
-                        ON ts.ticket_id = te.ticket_id
-                    where sentence_source = '{sentence}'
-                    """)
+        if table_name == 'tickets_embeddings_summary':
+            sentence_field = 'sentence'
+            select_statement = (f"""
+                        select te.ticket_id, te.sentence, te.product, te.module, te.sentence_embedding 
+                        from tickets_embeddings_summary te
+                        INNER JOIN tickets_similares ts
+                            ON ts.ticket_id = te.ticket_id
+                        {sentence_source_statement}
+                        """)
+        elif table_name == 'tickets_embeddings_chunks':
+            sentence_field = 'subject'
+            select_statement = (f"""
+                select te.ticket_id, te.{sentence_field} as sentence, te.product, te.module, te.subject_embedding as sentence_embedding
+                from tickets_embeddings_chunks te
+                INNER JOIN tickets_similares ts
+                    ON ts.ticket_id = te.ticket_id
+                """)
+        else:
+            sentence_field = sentence_source if sentence_source else 'subject'
+            select_statement = (f"""
+                select te.ticket_id, te.{sentence_field} as sentence, te.product, te.module, te.sentence_embedding 
+                from tickets_embeddings te
+                INNER JOIN tickets_similares ts
+                    ON ts.ticket_id = te.ticket_id
+                {sentence_source_statement}
+                """)
         
         ticket_inputs = DatabaseService().run_select_statement(select_statement, None)
 
-        dados = pd.DataFrame(ticket_inputs, columns=['ticket_id', 'sentence_embedding'])
+        df = pd.DataFrame(ticket_inputs, columns=['ticket_id', 'product', 'module', 'sentence', 'sentence_embedding'])
+
+        if table_name == 'tickets_embeddings_chunks':
+            df = df.drop_duplicates(subset=['ticket_id'])
+
+        print(f'Reading {len(df)} rows from the database...')
 
         # Initialize the progress bar
-        with tqdm(total=len(dados), desc="Processing") as pbar:
+        with tqdm(total=len(df), desc="Processing") as pbar:
             # Define a function to wrap find_similarity and update the progress bar
-            def process_row(index):
-                result = self.find_similarity(dados, product, module, sentence, index, pbar)
+            def process_row(row):
+                result = self.find_similarity(table_name, sentence_field, row, use_product, use_module, threshold)
                 pbar.update(1)
                 return result
 
             # Use Parallel to process each row in parallel
-            results = Parallel(n_jobs=-1, backend='threading')(delayed(process_row)(i) for i in range(len(dados)))
+            results = Parallel(n_jobs=-1, backend='threading')(delayed(process_row)(row) for _, row in df.iterrows())
 
         # Concatenate the DataFrames
         final_df = pd.concat(results, ignore_index=True)
-        group_df = pd.concat(results, ignore_index=True) 
+        final_df['hit'] = final_df.apply(lambda row: 1 if self.check_found(row) else 0, axis=1)
+        final_df['num_expected_ids'] = final_df['expected_id'].apply(lambda x: len(x.split(',')) if x else 0)
+
+        final_df.to_csv('final_df.csv', index=False)
+
+        top1 = self.compute_topk(final_df, 1)
+        top3 = self.compute_topk(final_df, 3)
+        top5 = self.compute_topk(final_df, 5)
+
+        print(f'Table name: {table_name.upper()}')
+
+        print(f"top 1: {top1}")
+        print(f"top 3: {top3}")
+        print(f"top 5: {top5}")
+
+        print('\n-------------------\n')
+
+        top1_float = self.compute_topk_float(final_df, 1)
+        top3_float = self.compute_topk_float(final_df, 3)
+        top5_float = self.compute_topk_float(final_df, 5)
+
+        print(f"top 1 float: {top1_float}")
+        print(f"top 3 float: {top3_float}")
+        print(f"top 5 float: {top5_float}")
+
+        # # # Apply function and create found and not found columns
+        # final_df['hit'] = final_df.apply(lambda row: 1 if self.check_found(row) else 0, axis=1)
+
+        # # List of all ticket_id for reference
+        # all_ticket_ids = set(group_df['ticket_id'])
 
         # # Apply function and create found and not found columns
-        final_df['found'] = final_df.apply(lambda row: 1 if self.check_found(row) else 0, axis=1)
+        # group_df[['found']] = group_df.apply(lambda row: pd.Series(self.check_expected(row, all_ticket_ids)), axis=1)
 
-        # List of all ticket_id for reference
-        all_ticket_ids = set(group_df['ticket_id'])
+        # # Keep only the necessary columns
+        # group_df = group_df[['expected_id', 'sentence', 'target', 'found']]
 
-        # Apply function and create found and not found columns
-        group_df[['found']] = group_df.apply(lambda row: pd.Series(self.check_expected(row, all_ticket_ids)), axis=1)
+        # # Group by target and aggregate the results
+        # df_grouped = group_df.groupby('target').agg({
+        #     'expected_id': 'first',
+        #     'sentence': 'first',
+        #     'found': 'first'
+        # }).reset_index()
 
-        # Keep only the necessary columns
-        group_df = group_df[['expected_id', 'sentence', 'target', 'found']]
+        # # Calculate calculate_top_k - top 3 e Top 5
+        # df_grouped['ptop3'], df_grouped['ptop5'] = zip(*df_grouped.apply(lambda row: self.calculate_ptopk(final_df, row['target'], [3, 5]), axis=1))
 
-        # Group by target and aggregate the results
-        df_grouped = group_df.groupby('target').agg({
-            'expected_id': 'first',
-            'sentence': 'first',
-            'found': 'first'
-        }).reset_index()
+        # # Apply the function to create columns 'top_1' and 'top_3'
+        # df_grouped[['top_1', 'top_3']] = df_grouped.apply(lambda row: pd.Series(self.calculate_topk(final_df, row['target'])), axis=1)
 
-        # Calculate calculate_top_k - top 3 e Top 5
-        df_grouped['ptop3'], df_grouped['ptop5'] = zip(*df_grouped.apply(lambda row: self.calculate_ptopk(final_df, row['target'], [3, 5]), axis=1))
+        # # Save results to BigQuery
+        # DatabaseService().save_dataframe_to_bigquery(df=df_grouped, table_id='result_1_mendes', if_exists='replace')
+        # DatabaseService().save_dataframe_to_bigquery(df=final_df, table_id='result_2_mendes', if_exists='replace')
 
-        # Apply the function to create columns 'top_1' and 'top_3'
-        df_grouped[['top_1', 'top_3']] = df_grouped.apply(lambda row: pd.Series(self.calculate_topk(final_df, row['target'])), axis=1)
-
-        # Save results to BigQuery
-        DatabaseService().save_dataframe_to_bigquery(df=df_grouped, table_id='result_1', if_exists='replace')
-        DatabaseService().save_dataframe_to_bigquery(df=final_df, table_id='result_2', if_exists='replace')
-
-        return df_grouped
-
-    # This function extracts expected ticket IDs, checks their presence in all_ticket_ids (converted to a set), 
-    # and returns counts of found and not found IDs.
-    def check_expected(self, row, all_ticket_ids):
-        try:
-            expected_ids = [int(x.strip()) for x in row['expected_id'].split(',') if x.strip().isdigit()]
-        except KeyError:
-            raise ValueError("The expected_id key is missing.")
-        except ValueError:
-            raise ValueError("The expected_id field contains non-numeric values.")
-        
-        all_ticket_ids_set = set(all_ticket_ids)
-        
-        found_count = sum(1 for eid in expected_ids if eid in all_ticket_ids_set)
-
-        return found_count
+        # return df_grouped
     
     # Function to check if the ticket_id is in the expected_id
     def check_found(self, row):
         expected_ids = [int(x.strip()) for x in row['expected_id'].split(',') if x.strip().isdigit()]
         return row['ticket_id'] in expected_ids
 
-    # Function to calculate the percentage of 'found' records in the top k records
-    #no caso do target = 19432291 o ptop5 deve ser 80% porque a posicao 4 ficou com zero
-    def calculate_ptopk(self, final_df, target, k_values):
-        filtered_df = final_df[final_df['target'] == target]
-        filtered_df_found_1 = filtered_df[filtered_df['found'] == 1]
-        
-        ptopk_values = []
-        for k in k_values:
-            n = min(len(filtered_df_found_1), k)
-            if n == 0:
-                ptopk_values.append(0)
-            else:
-                ptopk_values.append(sum(filtered_df_found_1['found'].head(n)) / n)
-        
-        return ptopk_values
+    def compute_topk(self, data: pd.DataFrame, k: int) -> float:
+        data_sorted = data.sort_values(["target", "score"], ascending=False)
+        data_topk = data_sorted.groupby("target").head(k)
+        hits_topk = data_topk.groupby("target")["hit"].apply(lambda x: x.sum() > 0)
+        return hits_topk.sum() / len(hits_topk)
 
-    # Function to calculate top_1 and top_3
-    #ajustar para top
-    def calculate_topk(self, final_df, target):
-        filtered_df = final_df[final_df['target'] == target]
-        if len(filtered_df) < 3:
-            top_1 = filtered_df.iloc[0]['found'] == 1 if not filtered_df.empty else False
-            top_3 = False
-        else:
-            top_1 = filtered_df.iloc[0]['found'] == 1 if not filtered_df.empty else False
-            top_3 = (filtered_df['found'].head(3).sum() >= 3) if not filtered_df.empty else False
-        return top_1, top_3
-
-
-        
+    def compute_topk_float(self, data: pd.DataFrame, k: int) -> float:
+        data_sorted = data.sort_values(["target", "score"], ascending=False)
+        data_topk = data_sorted.groupby("target").head(k)
+        hits_topk = data_topk.groupby("target").apply(lambda x: x['hit'].sum() / min(len(x), x['num_expected_ids'].iloc[0]))
+        return hits_topk.sum() / len(hits_topk)

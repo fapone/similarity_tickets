@@ -73,11 +73,11 @@ class LoadData:
 class DatabaseService:
 
     def __init__(self):
-        db_user='tecsupport'
-        db_password='?Hi((<={}F{nI=jp'
-        db_database='tecsupport'
-        db_port='5432'
-        db_host='34.123.172.21'
+        db_user=os.getenv('DBUSER')
+        db_password=os.getenv('DBPASSWORD')
+        db_database=os.getenv('DBDATABASE')
+        db_port=os.getenv('DBPORT')
+        db_host=os.getenv('DBHOST')
         self.connection_str = f"host='{db_host}' port='{db_port}' dbname='{db_database}' user='{db_user}' password='{db_password}'"
 
     def _get_database_connection(self):
@@ -191,7 +191,6 @@ class DocumentSearchService:
 
     def __init__(self):
         self.database_service = DatabaseService()
-        self.threshold = 65
 
     def ticket_summarization(self, sentence: str, llm):
         """Returns ticket summarization by comment.
@@ -236,10 +235,12 @@ class DocumentSearchService:
     
         return wrapped_text
 
-    def embeddings_search_on_database(self, query_vec: np.array, product: str, module: str,
-                                      threshold: int, similarity: str, ticket_id: int, batch: bool):
+    def embeddings_search_on_database(self, table_name: str, query_vec: np.array, sentence_field: str, product: str, module: str,
+                                      use_product: bool, use_module: bool, threshold: int,
+                                      similarity: str, ticket_id: int, batch: bool):
 
-        table_name = 'tickets_embeddings'
+        product_statement = f"AND product ~ 'ˆ{product}.*'" if use_product else ''
+        module_statement = f"AND module ~ 'ˆ{module}.*'" if use_module else ''
         
         if batch == False:
             select_statement = f'''SELECT * FROM
@@ -255,7 +256,7 @@ class DocumentSearchService:
         else:
             select_statement = f'''SELECT * FROM
                                     (
-                                        SELECT te.ticket_id, 1 - (sentence_embedding {similarity} %s) as score,
+                                        SELECT te.ticket_id, te.{sentence_field}, 1 - (sentence_embedding {similarity} %s) as score,
                                         (
                                             SELECT
                                                 expected_id
@@ -264,35 +265,35 @@ class DocumentSearchService:
                                             WHERE ticket_id = {ticket_id}
                                         ) as expected_id 
                                         FROM public.{table_name} te
-                                        WHERE te.ticket_id <> {ticket_id}
-                                    ) as filtered_kb
-                                WHERE score > {threshold/100};
+                                        WHERE te.ticket_id <> {ticket_id} 
+                                        {product_statement} {module_statement}
+                                    ) as filtered_kb;
                             '''
 
         result = self.database_service.run_select_statement(select_statement, (query_vec,))
         
         return pd.DataFrame(result)
 
-    def find_tickets_for_query(self, query: str, product: str, module: str, k: int, similarity: str, ticket_id: int, batch: bool):
+    def find_tickets_for_query(self, table_name: str, query: str, sentence_field: str, product: str, module: str, use_product: bool, use_module: bool, threshold: int, k: int, similarity: str, ticket_id: int, batch: bool):
         
         if batch == False:
             # Searching tickets using similarity of OpenAPI embeddings
             query_vec =  OpenAIEmbeddings(
                 openai_api_base="https://proxy.dta.totvs.ai/",
-                openai_api_key="sk-axyZ_tPhqNPbbywhdhhhKQ",
+                openai_api_key=os.getenv("DTA_PROXY_SECRET_KEY"),
                 model="text-embedding-3-small"  
                 ).embed_query(query)
             query_vec = np.array(query_vec)
         else:
             query_vec = query
 
-        results = self.embeddings_search_on_database(query_vec, product, module, self.threshold, similarity, ticket_id, batch)
+        results = self.embeddings_search_on_database(table_name, query_vec, sentence_field, product, module, use_product, use_module, threshold, similarity, ticket_id, batch)
 
         if results.empty:
             return results
         
         # Getting only results with score higher than threshold
-        results = results[results["score"] >= self.threshold / 100].copy()
+        # results = results[results["score"] >= self.threshold / 100].copy()
 
         # Ordering results by score
         results.sort_values(by="score", ascending=False, inplace=True)
@@ -463,14 +464,14 @@ class DocumentSearchService:
         # Instancia llm e embedding
         llm = OpenAI(
                     openai_api_base="https://proxy.dta.totvs.ai/",
-                    openai_api_key="sk-axyZ_tPhqNPbbywhdhhhKQ",
+                    openai_api_key=os.getenv("DTA_PROXY_SECRET_KEY"),
                     temperature=0,
                     model="gpt-4o",
                     )
 
         embedding =  OpenAIEmbeddings(
                     openai_api_base="https://proxy.dta.totvs.ai/",
-                    openai_api_key="sk-axyZ_tPhqNPbbywhdhhhKQ",
+                    openai_api_key=os.getenv("DTA_PROXY_SECRET_KEY"),
                     model="text-embedding-3-small"  
                     )
 
