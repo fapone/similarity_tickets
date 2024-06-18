@@ -235,12 +235,13 @@ class DocumentSearchService:
     
         return wrapped_text
 
-    def embeddings_search_on_database(self, table_name: str, query_vec: np.array, sentence_field: str, product: str, module: str,
+    def embeddings_search_on_database(self, table_name: str, query_vec: np.array, sentence_field: str, filter_field_destination: str, product: str, module: str,
                                       use_product: bool, use_module: bool, threshold: int,
                                       similarity: str, ticket_id: int, batch: bool):
 
-        product_statement = f"AND product ~ 'ˆ{product}.*'" if use_product else ''
-        module_statement = f"AND module ~ 'ˆ{module}.*'" if use_module else ''
+        product_statement = f"AND product ilike '{product}'" if use_product else ''
+        module_statement = f"AND module ilike '{module}'" if use_module else ''
+        field_statement = f"AND sentence_source = '{filter_field_destination}'" if filter_field_destination else ""
         
         if batch == False:
             select_statement = f'''SELECT * FROM
@@ -254,6 +255,7 @@ class DocumentSearchService:
                                 WHERE score > {threshold/100};
                             '''
         else:
+            sentence_field = 'chunk as sentence' if table_name == 'tickets_embeddings_chunks' else sentence_field
             select_statement = f'''SELECT * FROM
                                     (
                                         SELECT te.ticket_id, te.{sentence_field}, 1 - (sentence_embedding {similarity} %s) as score,
@@ -267,6 +269,7 @@ class DocumentSearchService:
                                         FROM public.{table_name} te
                                         WHERE te.ticket_id <> {ticket_id} 
                                         {product_statement} {module_statement}
+                                        {field_statement}
                                     ) as filtered_kb;
                             '''
 
@@ -274,7 +277,7 @@ class DocumentSearchService:
         
         return pd.DataFrame(result)
 
-    def find_tickets_for_query(self, table_name: str, query: str, sentence_field: str, product: str, module: str, use_product: bool, use_module: bool, threshold: int, k: int, similarity: str, ticket_id: int, batch: bool):
+    def find_tickets_for_query(self, table_name: str, query: str, sentence_field: str, filter_field_destination: str, product: str, module: str, use_product: bool, use_module: bool, threshold: int, k: int, similarity: str, ticket_id: int, batch: bool):
         
         if batch == False:
             # Searching tickets using similarity of OpenAPI embeddings
@@ -287,7 +290,7 @@ class DocumentSearchService:
         else:
             query_vec = query
 
-        results = self.embeddings_search_on_database(table_name, query_vec, sentence_field, product, module, use_product, use_module, threshold, similarity, ticket_id, batch)
+        results = self.embeddings_search_on_database(table_name, query_vec, sentence_field, filter_field_destination, product, module, use_product, use_module, threshold, similarity, ticket_id, batch)
 
         if results.empty:
             return results

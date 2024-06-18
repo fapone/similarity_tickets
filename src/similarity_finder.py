@@ -12,7 +12,7 @@ class SimilarityFinder:
     def __init__(self):
         pass
 
-    def find_similarity(self, table_name, sentence_field, row, use_product, use_module, threshold):
+    def find_similarity(self, table_name, sentence_field, filter_field_destination, row, use_product, use_module, threshold):
 
         ticket_id = row['ticket_id']
         sentence = row['sentence']
@@ -21,7 +21,7 @@ class SimilarityFinder:
         query_vec = np.array(row['sentence_embedding'])
 
         # Find similar tickets using cosine similarity
-        documents_df = DocumentSearchService().find_tickets_for_query(table_name, query_vec, sentence_field, product, module, use_product, use_module, threshold, k=20, similarity='<=>', ticket_id=ticket_id, batch=True)
+        documents_df = DocumentSearchService().find_tickets_for_query(table_name, query_vec, sentence_field, filter_field_destination, product, module, use_product, use_module, threshold, k=20, similarity='<=>', ticket_id=ticket_id, batch=True)
         
         if not documents_df.empty:
             results_df = documents_df
@@ -37,12 +37,12 @@ class SimilarityFinder:
 
         return pd.DataFrame()  # Return an empty DataFrame if no results are found
 
-    def process_data(self, table_name, sentence_source, use_product, use_module, threshold):
+    def process_data(self, table_name_source, table_name_destination, sentence_source, filter_field_destination, use_product, use_module, threshold, full_test: bool = False):
 
         sentence_source_statement = f"WHERE sentence_source = '{sentence_source}'" if sentence_source else ""
 
         # Select the ticket_id and sentence_embedding from the Vectorized Database
-        if table_name == 'tickets_embeddings_summary':
+        if table_name_source == 'tickets_embeddings_summary':
             sentence_field = 'sentence'
             select_statement = (f"""
                         select te.ticket_id, te.sentence, te.product, te.module, te.sentence_embedding 
@@ -51,7 +51,7 @@ class SimilarityFinder:
                             ON ts.ticket_id = te.ticket_id
                         {sentence_source_statement}
                         """)
-        elif table_name == 'tickets_embeddings_chunks':
+        elif table_name_source == 'tickets_embeddings_chunks':
             sentence_field = 'subject'
             select_statement = (f"""
                 select te.ticket_id, te.{sentence_field} as sentence, te.product, te.module, te.subject_embedding as sentence_embedding
@@ -73,7 +73,7 @@ class SimilarityFinder:
 
         df = pd.DataFrame(ticket_inputs, columns=['ticket_id', 'product', 'module', 'sentence', 'sentence_embedding'])
 
-        if table_name == 'tickets_embeddings_chunks':
+        if table_name_source == 'tickets_embeddings_chunks':
             df = df.drop_duplicates(subset=['ticket_id'])
 
         print(f'Reading {len(df)} rows from the database...')
@@ -82,7 +82,7 @@ class SimilarityFinder:
         with tqdm(total=len(df), desc="Processing") as pbar:
             # Define a function to wrap find_similarity and update the progress bar
             def process_row(row):
-                result = self.find_similarity(table_name, sentence_field, row, use_product, use_module, threshold)
+                result = self.find_similarity(table_name_destination, sentence_field, filter_field_destination, row, use_product, use_module, threshold)
                 pbar.update(1)
                 return result
 
@@ -91,30 +91,55 @@ class SimilarityFinder:
 
         # Concatenate the DataFrames
         final_df = pd.concat(results, ignore_index=True)
+        if final_df.empty:
+            print('No results found')
+            return {}
+        
+        final_df.sort_values(by=['target','ticket_id', 'score'], ascending=False, inplace=True)
+        final_df.drop_duplicates(subset=['target','ticket_id'], keep="first", inplace=True)
         final_df['hit'] = final_df.apply(lambda row: 1 if self.check_found(row) else 0, axis=1)
         final_df['num_expected_ids'] = final_df['expected_id'].apply(lambda x: len(x.split(',')) if x else 0)
 
         final_df.to_csv('final_df.csv', index=False)
 
+        result = {'table_name': table_name_destination,
+                  'field_query': sentence_source,
+                  'field_search': filter_field_destination if filter_field_destination else 'ALL',
+                  'use_product': use_product,
+                  'use_module': use_module}
+
         top1 = self.compute_topk(final_df, 1)
         top3 = self.compute_topk(final_df, 3)
         top5 = self.compute_topk(final_df, 5)
 
-        print(f'Table name: {table_name.upper()}')
+        result['top1'] = top1
+        result['top3'] = top3
+        result['top5'] = top5
 
-        print(f"top 1: {top1}")
-        print(f"top 3: {top3}")
-        print(f"top 5: {top5}")
+        if not full_test:
+            print(f'Table name source: {table_name_source.upper()}')
+            print(f'Table name destination: {table_name_destination.upper()}')
 
-        print('\n-------------------\n')
+            print(f"top 1: {top1}")
+            print(f"top 3: {top3}")
+            print(f"top 5: {top5}")
+
+            print('\n-------------------\n')
 
         top1_float = self.compute_topk_float(final_df, 1)
         top3_float = self.compute_topk_float(final_df, 3)
         top5_float = self.compute_topk_float(final_df, 5)
 
-        print(f"top 1 float: {top1_float}")
-        print(f"top 3 float: {top3_float}")
-        print(f"top 5 float: {top5_float}")
+        result['top1_float'] = top1_float
+        result['top3_float'] = top3_float
+        result['top5_float'] = top5_float
+
+        if not full_test:
+            print(f"top 1 float: {top1_float}")
+            print(f"top 3 float: {top3_float}")
+            print(f"top 5 float: {top5_float}")
+
+        return result
 
         # # # Apply function and create found and not found columns
         # final_df['hit'] = final_df.apply(lambda row: 1 if self.check_found(row) else 0, axis=1)
