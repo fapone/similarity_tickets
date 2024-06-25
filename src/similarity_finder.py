@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from joblib import Parallel, delayed
-from embedding import DatabaseService
-from embedding import DocumentSearchService
+from document_search_service import DatabaseService
+from document_search_service import DocumentSearchService
 import time
 from google.oauth2 import service_account
 import pandas_gbq
@@ -44,12 +44,14 @@ class SimilarityFinder:
         # Select the ticket_id and sentence_embedding from the Vectorized Database
         if table_name_source == 'tickets_embeddings_summary':
             sentence_field = 'sentence'
+            product_statement = f" AND product = 'TOTVS Backoffice (Linha Datasul)'" if sentence_source else f" WHERE product = 'TOTVS Backoffice (Linha Datasul)'"
             select_statement = (f"""
                         select te.ticket_id, te.sentence, te.product, te.module, te.sentence_embedding 
                         from tickets_embeddings_summary te
                         INNER JOIN tickets_similares ts
                             ON ts.ticket_id = te.ticket_id
                         {sentence_source_statement}
+                        {product_statement}
                         """)
         elif table_name_source == 'tickets_embeddings_chunks':
             sentence_field = 'subject'
