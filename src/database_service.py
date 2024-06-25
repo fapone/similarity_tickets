@@ -116,3 +116,4 @@ class DatabaseService:
         except Exception as e:
             print(f'Inserting {len(data_list)} rows into database failed. {e}')
             conn.rollback()
+            raise e

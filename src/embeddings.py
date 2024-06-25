@@ -235,6 +235,7 @@ def split_document(document):
 
 
 def create_chunk_embeddings(df, embedding_llm):
+    df['ticket_comment'] = df['ticket_comment'].str.replace(r'\x00', "")
     df['chunk'] = df['ticket_comment'].apply(split_document)
     df = df.explode('chunk', ignore_index=True)
     sentences_pending = df["chunk"].unique()
@@ -272,11 +273,11 @@ def create_chunk_embeddings(df, embedding_llm):
             data_list = [(ticket_id,  row['ticket_comment'], row['ticket_chunk_hash'],
                           row['module'],  row['product'], row['ticket_status'], row['sentence_embedding'], 
                           row['created_at'],  row['updated_at'], row['chunk'], row['subject'])]
-        try:
-            DatabaseService().run_insert_chunks_embeddings_statement('tickets_embeddings_chunks', data_list)
-        except Exception as e:
-            print(f'Error inserting ticket {ticket_id} into database. {e}. Skipping this chunk.')
-            pass
+            try:
+                DatabaseService().run_insert_chunks_embeddings_statement('tickets_embeddings_chunks', data_list)
+            except Exception as e:
+                print(f'Error inserting ticket {ticket_id} into database. {e}. Skipping this chunk.')
+                pass
 
 
 def create_embeddings_and_sent_to_db(table_destination: str):
